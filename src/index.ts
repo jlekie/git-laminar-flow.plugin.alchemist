@@ -5,8 +5,7 @@ import * as Zod from 'zod';
 
 import { Command, Option } from 'clipanion';
 
-import { PluginHandler } from '@jlekie/git-laminar-flow-cli';
-import { BaseCommand } from '@jlekie/git-laminar-flow-cli';
+import { PluginHandler, BaseCommand, Config } from '@jlekie/git-laminar-flow-cli';
 import { createDataAdapter, transmute, Manifest } from '@jlekie/alchemist';
 
 const OptionsSchema = Zod.object({
@@ -25,6 +24,7 @@ const createPlugin: PluginHandler = (options) => {
 
     return {
         init: async ({ config, stdout, dryRun }) => {
+            await alchemyTransmute(config, parsedOptions);
         },
         updateVersion: async (oldVersion, newVersion, { config, stdout, dryRun }) => {
         },
@@ -40,45 +40,40 @@ const createPlugin: PluginHandler = (options) => {
 
                 public async executeCommand() {
                     const config = await this.loadConfig();
-                    const configs = config.flattenConfigs();
 
-                    const filteredConfigs = configs.filter(c => {
-                        const labels = c.normalizeLabels();
-
-                        return _.every(parsedOptions.included, (v, k) => labels[k]?.some(l => v.indexOf(l) >= 0))
-                    });
-
-                    const dataAdapter = createDataAdapter();
-
-                    if (_.isString(parsedOptions.manifest)) {
-                        const [ loadedManifest, manifestBasePath ] = await dataAdapter.loadManifest(parsedOptions.manifest, {
-                            configs: filteredConfigs.map(c => c.toHash())
-                        });
-
-                        await transmute({
-                            manifestBasePath,
-                            dataAdapter,
-                            loadedManifest,
-                            contextValues: {}
-                        });
-                    }
-                    else {
-                        const loadedManifest = Manifest.parse({
-                            ...parsedOptions.manifest,
-                            context: {
-                                configs: filteredConfigs.map(c => c.toHash())
-                            }
-                        });
-
-                        await transmute({
-                            dataAdapter,
-                            loadedManifest,
-                            contextValues: {}
-                        });
-                    }
+                    await alchemyTransmute(config, parsedOptions);
                 }
             }
         ]
+    }
+}
+
+export async function alchemyTransmute(config: Config, options: Zod.infer<typeof OptionsSchema>) {
+    const recursiveConfig = config.toContextHash();
+
+    const dataAdapter = createDataAdapter();
+
+    if (_.isString(options.manifest)) {
+        const [ loadedManifest, manifestBasePath ] = await dataAdapter.loadManifest(options.manifest, recursiveConfig);
+
+        await transmute({
+            manifestBasePath,
+            dataAdapter,
+            loadedManifest,
+            contextValues: {}
+        });
+    }
+    else {
+        const loadedManifest = Manifest.parse({
+            ...options.manifest,
+            context: recursiveConfig
+        });
+
+        await transmute({
+            dataAdapter,
+            loadedManifest,
+            contextValues: {}
+        });
     }
 }
 
